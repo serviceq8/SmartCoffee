@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const initDB = require('./db/init');
 const pool   = require('./db/pool');
+const mqttClient = require('./mqtt/client');
 
 const app = express();
 
@@ -16,13 +17,18 @@ app.use(express.json());
 // ── Init database ─────────────────────────────────────────────
 initDB();
 
+// ── Connect to HiveMQ ─────────────────────────────────────────
+mqttClient.connect();
+
 // ── Health check ─────────────────────────────────────────────
 app.get('/health', (req, res) => {
+  const mqtt = mqttClient.getClient();
   res.json({
-    status : 'ok',
-    service: 'Smart Coffee API',
-    version: '1.0.0',
-    time   : new Date().toISOString(),
+    status     : 'ok',
+    service    : 'Smart Coffee API',
+    version    : '1.0.0',
+    time       : new Date().toISOString(),
+    mqtt       : mqtt?.connected ? 'connected' : 'disconnected',
   });
 });
 
