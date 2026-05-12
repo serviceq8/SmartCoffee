@@ -38,11 +38,53 @@ exports.getMachine = async (req, res) => {
 exports.createMachine = async (req, res) => {
   try {
     const { id, name, branch_id, type, secret_key } = req.body;
-    const result = await pool.query(
-      `INSERT INTO machines (id, name, branch_id, type, secret_key)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [id, name, branch_id, type, secret_key]
+
+    if (!id || !name || !secret_key) {
+      return res.status(400).json({ error: 'id, name and secret_key are required' });
+    }
+
+    // Check if machine ID already exists
+    const existing = await pool.query(
+      `SELECT id FROM machines WHERE id = $1`, [id]
     );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: `Machine ${id} already exists` });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO machines (id, name, branch_id, type, secret_key, status, suspended)
+       VALUES ($1, $2, $3, $4, $5, 'offline', false)
+       RETURNING *`,
+      [id, name, branch_id, type || 'Smart', secret_key]
+    );
+
+    // Add default drinks
+    const drinks = [
+      { name: 'Espresso',   icon: '☕' },
+      { name: 'Cappuccino', icon: '☁️' },
+      { name: 'Flat White', icon: '🥛' },
+      { name: 'Americano',  icon: '🌊' },
+    ];
+    for (const d of drinks) {
+      await pool.query(
+        `INSERT INTO drinks (machine_id, name, icon, available) VALUES ($1, $2, $3, true)`,
+        [id, d.name, d.icon]
+      );
+    }
+
+    // Add default suppliers
+    await pool.query(
+      `INSERT INTO suppliers (machine_id, role, name) VALUES ($1, 'beans', 'Air Roastery'), ($1, 'milk', 'KDCOW')`,
+      [id]
+    );
+
+    // Add default screen content
+    await pool.query(
+      `INSERT INTO machine_content (machine_id, welcome_msg, screen_theme)
+       VALUES ($1, 'أهلاً بك في بوبيان', 'boubyan-red')`,
+      [id]
+    );
+
     res.status(201).json({ ok: true, machine: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -58,7 +100,71 @@ exports.updateMachine = async (req, res) => {
        WHERE id = $5 RETURNING *`,
       [name, branch_id, type, status, req.params.id]
     );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Machine not found' });
+    }
     res.json({ ok: true, machine: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ── DELETE /admin/machines/:id ────────────────────────────────
+exports.deleteMachine = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check machine exists
+    const existing = await pool.query(`SELECT id FROM machines WHERE id = $1`, [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Machine not found' });
+    }
+
+    // Remove related data first (foreign keys)
+    await pool.query(`DELETE FROM machine_content WHERE machine_id = $1`, [id]);
+    await pool.query(`DELETE FROM suppliers      WHERE machine_id = $1`, [id]);
+    await pool.query(`DELETE FROM drinks         WHERE machine_id = $1`, [id]);
+    await pool.query(`DELETE FROM faults         WHERE machine_id = $1`, [id]);
+    await pool.query(`UPDATE orders SET status = 'cancelled' WHERE machine_id = $1 AND status IN ('queued','confirmed')`, [id]);
+    await pool.query(`DELETE FROM machines WHERE id = $1`, [id]);
+
+    res.json({ ok: true, message: `Machine ${id} removed from system` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ── PUT /admin/machines/:id/suspend ───────────────────────────
+exports.suspendMachine = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE machines SET suspended = true, status = 'offline'
+       WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Machine not found' });
+    }
+    res.json({ ok: true, message: `Machine ${id} suspended — hidden from Msa3ed`, machine: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// ── PUT /admin/machines/:id/activate ─────────────────────────
+exports.activateMachine = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE machines SET suspended = false
+       WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Machine not found' });
+    }
+    res.json({ ok: true, message: `Machine ${id} activated — visible in Msa3ed`, machine: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -81,7 +187,6 @@ exports.getAllOrders = async (req, res) => {
     }
 
     query += ` ORDER BY created_at DESC LIMIT 100`;
-
     const result = await pool.query(query, vals);
     res.json({ orders: result.rows });
   } catch (err) {
@@ -118,10 +223,7 @@ exports.getAllFaults = async (req, res) => {
 // ── PUT /admin/faults/:id/resolve ─────────────────────────────
 exports.resolveFault = async (req, res) => {
   try {
-    await pool.query(
-      `UPDATE faults SET resolved = true WHERE id = $1`,
-      [req.params.id]
-    );
+    await pool.query(`UPDATE faults SET resolved = true WHERE id = $1`, [req.params.id]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

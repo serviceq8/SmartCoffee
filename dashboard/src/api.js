@@ -1,46 +1,40 @@
 const BASE = 'https://smart-coffee-api.onrender.com/api/v1';
 
-async function get(path) {
-  const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
-  return res.json();
-}
-
-async function post(path, body) {
-  const res = await fetch(`${BASE}${path}`, {
-    method : 'POST',
+async function req(method, path, body) {
+  const opts = {
+    method,
     headers: { 'Content-Type': 'application/json' },
-    body   : JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`);
-  return res.json();
-}
-
-async function put(path, body) {
-  const res = await fetch(`${BASE}${path}`, {
-    method : 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body   : JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`PUT ${path} failed: ${res.status}`);
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(`${BASE}${path}`, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `${method} ${path} failed: ${res.status}`);
+  }
   return res.json();
 }
 
 export const api = {
-  // Admin
-  getMachines   : ()   => get('/admin/machines'),
-  getOrders     : ()   => get('/admin/orders'),
-  getBranches   : ()   => get('/admin/branches'),
-  getFaults     : ()   => get('/admin/faults'),
-  resolveFault  : (id) => put(`/admin/faults/${id}/resolve`),
+  // Admin — machines
+  getMachines    : ()         => req('GET',    '/admin/machines'),
+  getMachine     : (id)       => req('GET',    `/machines/${id}`),
+  createMachine  : (body)     => req('POST',   '/admin/machines', body),
+  updateMachine  : (id, body) => req('PUT',    `/admin/machines/${id}`, body),
+  deleteMachine  : (id)       => req('DELETE', `/admin/machines/${id}`),
+  suspendMachine : (id)       => req('PUT',    `/admin/machines/${id}/suspend`),
+  activateMachine: (id)       => req('PUT',    `/admin/machines/${id}/activate`),
+
+  // Admin — other
+  getOrders  : () => req('GET', '/admin/orders'),
+  getBranches: () => req('GET', '/admin/branches'),
+  getFaults  : () => req('GET', '/admin/faults'),
 
   // Machine detail
-  getMachine    : (id) => get(`/machines/${id}`),
-  getMenu       : (id) => get(`/machines/${id}/menu`),
-  getSuppliers  : (id) => get(`/machines/${id}/suppliers`),
+  getMenu     : (id) => req('GET', `/machines/${id}/menu`),
+  getSuppliers: (id) => req('GET', `/machines/${id}/suppliers`),
 
   // Orders
-  createOrder   : (body) => post('/orders', body),
-  completeOrder : (id)   => post(`/orders/${id}/complete`),
-  cancelOrder   : (id)   => fetch(`${BASE}/orders/${id}`, { method: 'DELETE' }),
+  createOrder : (body) => req('POST',   '/orders', body),
+  completeOrder: (id)  => req('POST',   `/orders/${id}/complete`),
+  cancelOrder  : (id)  => req('DELETE', `/orders/${id}`),
 };
