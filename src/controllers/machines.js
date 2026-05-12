@@ -1,5 +1,39 @@
 const pool = require('../db/pool');
 
+// ── POST /machines/register ───────────────────────────────────
+exports.register = async (req, res) => {
+  try {
+    const { id, secret_key } = req.body;
+
+    if (!id || !secret_key) {
+      return res.status(400).json({ error: 'id and secret_key are required' });
+    }
+
+    const result = await pool.query(
+      `SELECT id, status FROM machines WHERE id = $1 AND secret_key = $2`,
+      [id, secret_key]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid machine ID or secret key' });
+    }
+
+    await pool.query(
+      `UPDATE machines SET status = 'online', last_heartbeat = NOW() WHERE id = $1`,
+      [id]
+    );
+
+    res.json({
+      ok         : true,
+      machine_id : id,
+      token      : `token-${id}-${Date.now()}`,
+      mqtt_topic : `boubyan/machines/${id}/commands`,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // ── POST /machines/:id/heartbeat ──────────────────────────────
 exports.heartbeat = async (req, res) => {
   try {
@@ -34,7 +68,7 @@ exports.updateStatus = async (req, res) => {
 // ── POST /machines/:id/stock ──────────────────────────────────
 exports.updateStock = async (req, res) => {
   try {
-    const { id }              = req.params;
+    const { id }                = req.params;
     const { beans, milk, cups } = req.body;
     await pool.query(
       `UPDATE machines
@@ -51,7 +85,7 @@ exports.updateStock = async (req, res) => {
 // ── POST /machines/:id/fault ──────────────────────────────────
 exports.reportFault = async (req, res) => {
   try {
-    const { id }                        = req.params;
+    const { id }                         = req.params;
     const { fault_code, severity, message } = req.body;
     const result = await pool.query(
       `INSERT INTO faults (machine_id, fault_code, severity, message)
@@ -82,7 +116,6 @@ exports.verifyCode = async (req, res) => {
     }
 
     const order = result.rows[0];
-
     await pool.query(
       `UPDATE orders SET status = 'confirmed', updated_at = NOW() WHERE id = $1`,
       [order.id]
@@ -115,8 +148,12 @@ exports.getContent = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      `SELECT mc.*, 
-              json_agg(json_build_object('role', s.role, 'name', s.name, 'logo_url', s.logo_url)) AS suppliers
+      `SELECT mc.*,
+              json_agg(json_build_object(
+                'role', s.role,
+                'name', s.name,
+                'logo_url', s.logo_url
+              )) AS suppliers
        FROM machine_content mc
        LEFT JOIN suppliers s ON s.machine_id = mc.machine_id
        WHERE mc.machine_id = $1

@@ -6,6 +6,7 @@ const controller = require('../controllers/machines');
 router.get('/nearby',             controller.getNearby);
 
 // ── Layer 2: Machine APIs ─────────────────────────────────────
+router.post('/register',          controller.register);
 router.post('/:id/heartbeat',     controller.heartbeat);
 router.put('/:id/status',         controller.updateStatus);
 router.post('/:id/stock',         controller.updateStock);
